@@ -8,7 +8,12 @@ export default defineConfig({
     build: {
       externalizeDeps: false,
       rollupOptions: {
-        external: ["electron", "node-global-key-listener"],
+        external: [
+          "electron",
+          "node-global-key-listener",
+          "bufferutil",
+          "utf-8-validate",
+        ],
       },
     },
   },
