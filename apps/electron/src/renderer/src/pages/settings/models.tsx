@@ -649,7 +649,7 @@ function PageShell({
     >
       <div className="h-9 shrink-0" />
       <div
-        className="flex-1 overflow-auto px-12 pb-12"
+        className="responsive-page-scroll flex-1 overflow-auto"
         style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
       >
         {children}
@@ -706,7 +706,7 @@ function PairCard({
   pickerOpen: PickerType;
 }): React.JSX.Element {
   return (
-    <section className="border-border bg-card grid grid-cols-2 gap-6 rounded-[14px] border p-6">
+    <section className="border-border bg-card grid grid-cols-1 gap-6 rounded-[14px] border p-6 min-[820px]:grid-cols-2">
       <PairSide
         kicker="Voice · required"
         modelName={voice?.model_name}
@@ -716,7 +716,7 @@ function PairCard({
         active={pickerOpen === "voice"}
         onChange={onChangeVoice}
       />
-      <div className="border-border border-l pl-6">
+      <div className="border-border border-t pt-6 min-[820px]:border-l min-[820px]:border-t-0 min-[820px]:pl-6 min-[820px]:pt-0">
         <PairSide
           kicker="LLM cleanup · optional"
           modelName={llm?.model_name}
@@ -1281,7 +1281,7 @@ function ProvidersSection({
         <button
           type="button"
           onClick={onAdd}
-          className="border-border text-foreground hover:bg-secondary flex items-center gap-1.5 rounded-[7px] border px-3 py-1.5 text-[12.5px] font-medium"
+          className="shrink-0 border-border text-foreground hover:bg-secondary flex items-center gap-1.5 rounded-[7px] border px-3 py-1.5 text-[12.5px] font-medium"
         >
           <Plus size={13} />
           Add provider

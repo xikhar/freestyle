@@ -217,6 +217,8 @@ function createSettingsWindow(): void {
   settingsWindow = new BrowserWindow({
     width: 800,
     height: 560,
+    minWidth: 720,
+    minHeight: 480,
     show: false,
     autoHideMenuBar: true,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",

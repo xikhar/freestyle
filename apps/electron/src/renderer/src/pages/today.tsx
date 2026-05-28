@@ -195,7 +195,7 @@ export default function TodayPage(): React.JSX.Element {
         {/* macOS drag region — the title bar area */}
         <div className="h-9 shrink-0" />
         <div
-          className="flex-1 overflow-auto px-9 pb-6"
+          className="responsive-page-scroll flex-1 overflow-auto"
           style={
             {
               WebkitAppRegion: "no-drag",
@@ -213,7 +213,7 @@ export default function TodayPage(): React.JSX.Element {
               {/* "Open slot" cap — represents the next, future session. With
                   reverse-chronological order it sits above the latest entry. */}
               <div className="relative mb-5">
-                <span className="border-border bg-background absolute top-1 -left-[25px] h-2.5 w-2.5 rounded-full border-[1.5px] border-dashed" />
+                <span className="border-border bg-background absolute top-1 -left-[30px] h-2.5 w-2.5 rounded-full border-[1.5px] border-dashed" />
                 <span className="serif-italic text-muted-foreground text-[18px]">
                   ready when you are…
                 </span>
