@@ -1,4 +1,14 @@
 # Changelog
+## 0.0.10
+
+### Bug Fixes 🐛
+
+- Set app name to Freestyle in macOS menu bar by @MathurAditya724 in [#100](https://github.com/freestyle-voice/freestyle/pull/100)
+
+### Other
+
+- Changed settings window size by @kaito-undefined in [#93](https://github.com/freestyle-voice/freestyle/pull/93)
+
 ## 0.0.9
 
 ### New Features ✨
