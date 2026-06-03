@@ -1441,7 +1441,7 @@ function handleNativeHotkeyUp(): void {
   }
 }
 
-function registerHotkey(hotkey?: string): void {
+async function registerHotkey(hotkey?: string): Promise<void> {
   // Tear down previous listener
   if (keyListener) {
     keyListener.stop();
@@ -1460,19 +1460,29 @@ function registerHotkey(hotkey?: string): void {
   currentHotkeyAccel = accel;
 
   // Try native key listener binary first (all platforms)
-  keyListener = new NativeKeyListener({
+  let nativeError = "";
+  const listener = new NativeKeyListener({
     hotkey: accel,
     onKeyDown: handleNativeHotkeyDown,
     onKeyUp: handleNativeHotkeyUp,
     onError: (error) => {
+      nativeError = error;
       hotkeyLog.error(`Native key listener error: ${error}`);
     },
     onReady: () => {
       hotkeyLog.debug(`Native key listener ready for "${accel}"`);
     },
   });
+  keyListener = listener;
 
-  const started = keyListener.start();
+  const started = await listener.start();
+
+  // Another registerHotkey call may have replaced keyListener while we
+  // were awaiting — if so, abandon this attempt.
+  if (keyListener !== listener) {
+    listener.stop();
+    return;
+  }
 
   if (started) {
     accessibilityConfirmed = true;
@@ -1480,6 +1490,7 @@ function registerHotkey(hotkey?: string): void {
     hotkeyLog.warn(
       "Native key listener unavailable, falling back to Electron globalShortcut (toggle mode).",
     );
+    listener.stop();
     keyListener = null;
 
     // Fallback: globalShortcut has no key-up — always use toggle semantics
@@ -1495,9 +1506,14 @@ function registerHotkey(hotkey?: string): void {
     if (registered) {
       accessibilityConfirmed = true;
     } else {
-      const errorPayload = {
-        message: `Could not register hotkey "${accel}". Try a different key combination in Settings.`,
-      };
+      let message = `Could not register hotkey "${accel}". Try a different key combination in Settings.`;
+      if (
+        process.platform === "linux" &&
+        nativeError.includes("No accessible input devices")
+      ) {
+        message = `Hotkey "${accel}" requires access to input devices. Run: sudo usermod -aG input $USER — then log out and back in.`;
+      }
+      const errorPayload = { message };
       mainWindow?.webContents.send("hotkey:error", errorPayload);
       settingsWindow?.webContents.send("hotkey:error", errorPayload);
     }
