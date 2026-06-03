@@ -45,8 +45,10 @@ import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
 import server, {
+  activateManagedMlxRuntimeForAppVersion,
   autoStartWhisperServer,
   closeDb,
+  prefetchManagedMlxRuntimeForAppRelease,
   reconcileUnsupportedMlxVoiceDefault,
 } from "@freestyle/server";
 import { createAppLogger } from "@freestyle/utils";
@@ -1015,6 +1017,9 @@ app.whenReady().then(async () => {
   process.env.FREESTYLE_DB_PATH = join(app.getPath("userData"), "freestyle.db");
 
   process.env.FREESTYLE_ENV = is.dev ? "development" : "production";
+  if (!is.dev) {
+    process.env.FREESTYLE_MLX_ASR_RELEASE_TAG ||= app.getVersion();
+  }
 
   // Run non-critical server startup tasks now that the DB path is set
   reconcileUnsupportedMlxVoiceDefault();
@@ -1062,6 +1067,18 @@ app.whenReady().then(async () => {
     );
   } else {
     startServer(DEFAULT_PORT);
+  }
+
+  if (!is.dev) {
+    void activateManagedMlxRuntimeForAppVersion(app.getVersion()).catch(
+      (err) => {
+        log.warn(
+          `Failed to activate MLX runtime for app ${app.getVersion()}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      },
+    );
   }
 
   createTray();
@@ -1145,6 +1162,13 @@ app.whenReady().then(async () => {
         updateCheckTimer = null;
       }
       rebuildMenus();
+      void prefetchManagedMlxRuntimeForAppRelease(info.version).catch((err) => {
+        log.warn(
+          `Failed to stage MLX runtime for ${info.version}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      });
     });
 
     autoUpdater.on("error", (err) => {

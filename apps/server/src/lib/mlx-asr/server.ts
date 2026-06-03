@@ -14,6 +14,11 @@ import {
   getMlxAsrWorkerPath,
   isMlxAudioInstalled,
 } from "./python.js";
+import {
+  isManagedMlxRuntimeAvailable,
+  markManagedMlxRuntimeSyncedForAppVersion,
+  updateManagedMlxRuntimeIfNeeded,
+} from "./runtime.js";
 
 const log = createAppLogger("mlx-asr");
 const START_TIMEOUT_MS = 120_000;
@@ -329,6 +334,14 @@ async function startWorker(modelId: string): Promise<void> {
     throw new Error(`Unknown MLX ASR model: ${modelId}`);
   }
 
+  await updateManagedMlxRuntimeIfNeeded().catch((err) => {
+    log.warn(
+      `Failed to refresh managed runtime before worker start: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  });
+
   const candidates = workerLaunchCandidates(def.hfId);
   if (candidates.length === 0) {
     throw new Error(
@@ -343,6 +356,10 @@ async function startWorker(modelId: string): Promise<void> {
     workerFailed = false;
     try {
       await spawnWorkerProcess(candidate.command, candidate.spawnArgs);
+      const releaseTag = process.env.FREESTYLE_MLX_ASR_RELEASE_TAG;
+      if (releaseTag && isManagedMlxRuntimeAvailable()) {
+        markManagedMlxRuntimeSyncedForAppVersion(releaseTag);
+      }
       log.debug(`started via ${candidate.label}`);
       return;
     } catch (err) {
