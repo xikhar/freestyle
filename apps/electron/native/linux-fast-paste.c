@@ -534,19 +534,16 @@ int main(int argc, char *argv[]) {
     if (use_portal) {
 #ifdef HAVE_GIO
         int shift = force_terminal;
-        if (!shift) {
+        if (!shift && target_window != None) {
             Display *dpy = XOpenDisplay(NULL);
             if (dpy) {
-                Window win = (target_window != None) ? target_window : get_active_window(dpy);
-                if (win != None) {
-                    XClassHint hint;
-                    if (XGetClassHint(dpy, win, &hint)) {
-                        shift = is_terminal(hint.res_class) || is_terminal(hint.res_name);
-                        XFree(hint.res_name);
-                        XFree(hint.res_class);
-                    } else {
-                        shift = check_parent_terminal(dpy, win);
-                    }
+                XClassHint hint;
+                if (XGetClassHint(dpy, target_window, &hint)) {
+                    shift = is_terminal(hint.res_class) || is_terminal(hint.res_name);
+                    XFree(hint.res_name);
+                    XFree(hint.res_class);
+                } else {
+                    shift = check_parent_terminal(dpy, target_window);
                 }
                 XCloseDisplay(dpy);
             }
@@ -561,19 +558,16 @@ int main(int argc, char *argv[]) {
     if (use_uinput) {
 #ifdef HAVE_UINPUT
         int shift = force_terminal;
-        if (!shift) {
+        if (!shift && target_window != None) {
             Display *dpy = XOpenDisplay(NULL);
             if (dpy) {
-                Window win = (target_window != None) ? target_window : get_active_window(dpy);
-                if (win != None) {
-                    XClassHint hint;
-                    if (XGetClassHint(dpy, win, &hint)) {
-                        shift = is_terminal(hint.res_class) || is_terminal(hint.res_name);
-                        XFree(hint.res_name);
-                        XFree(hint.res_class);
-                    } else {
-                        shift = check_parent_terminal(dpy, win);
-                    }
+                XClassHint hint;
+                if (XGetClassHint(dpy, target_window, &hint)) {
+                    shift = is_terminal(hint.res_class) || is_terminal(hint.res_name);
+                    XFree(hint.res_name);
+                    XFree(hint.res_class);
+                } else {
+                    shift = check_parent_terminal(dpy, target_window);
                 }
                 XCloseDisplay(dpy);
             }

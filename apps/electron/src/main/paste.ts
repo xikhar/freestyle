@@ -11,6 +11,17 @@ function execAsync(cmd: string): Promise<void> {
   });
 }
 
+async function tryExecAsync(cmd: string, label: string): Promise<boolean> {
+  try {
+    await execAsync(cmd);
+    return true;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log.warn(`${label} failed: ${message}`);
+    return false;
+  }
+}
+
 function execFileAsync(path: string, args: string[] = []): Promise<number> {
   return new Promise((resolve, reject) => {
     execFile(path, args, (err) => {
@@ -32,6 +43,13 @@ function execFileAsync(path: string, args: string[] = []): Promise<number> {
       }
     });
   });
+}
+
+function isWaylandSession(): boolean {
+  return (
+    process.env.XDG_SESSION_TYPE?.toLowerCase() === "wayland" ||
+    Boolean(process.env.WAYLAND_DISPLAY)
+  );
 }
 
 async function pasteMac(): Promise<"native" | "legacy"> {
@@ -72,32 +90,59 @@ async function pasteWindows(): Promise<"native" | "legacy"> {
   return "legacy";
 }
 
-async function pasteLinux(): Promise<"native" | "legacy"> {
+type PasteMethod = "native" | "legacy";
+
+async function pasteLinux(): Promise<PasteMethod> {
   const binaryPath = getNativeBinaryPath("linux-fast-paste");
+  const wayland = isWaylandSession();
+
+  if (wayland) {
+    return pasteLinuxWayland(binaryPath);
+  }
+
   if (binaryPath) {
-    const args: string[] = [];
-    if (process.env.XDG_SESSION_TYPE === "wayland") {
-      args.push("--portal");
-    }
-    const exitCode = await execFileAsync(binaryPath, args);
+    const exitCode = await execFileAsync(binaryPath);
     if (exitCode !== 0) {
       log.warn(
-        `Native paste failed (exit ${exitCode}), falling back to xdotool/wtype`,
+        `Native paste failed (exit ${exitCode}), falling back to xdotool`,
       );
-      await pasteLinuxLegacy();
+      await pasteLinuxLegacy(false);
       return "legacy";
     }
     return "native";
   }
-  await pasteLinuxLegacy();
+  await pasteLinuxLegacy(false);
   return "legacy";
 }
 
-async function pasteLinuxLegacy(): Promise<void> {
-  try {
+async function pasteLinuxWayland(
+  binaryPath: string | null,
+): Promise<PasteMethod> {
+  if (binaryPath) {
+    const exitCode = await execFileAsync(binaryPath, ["--uinput"]);
+    if (exitCode === 0) {
+      return "legacy";
+    }
+    log.warn(
+      `Native uinput paste failed (exit ${exitCode}), falling back to wtype`,
+    );
+  }
+
+  await pasteLinuxLegacy(true);
+  return "legacy";
+}
+
+async function pasteLinuxLegacy(wayland: boolean): Promise<void> {
+  if (wayland) {
+    const pasted = await tryExecAsync(
+      "wtype -M ctrl -P v -p v -m ctrl",
+      "wtype paste",
+    );
+    if (!pasted) {
+      throw new Error("No supported Wayland paste backend succeeded");
+    }
+  } else {
     await execAsync("xdotool key ctrl+v");
-  } catch {
-    await execAsync("wtype -M ctrl -P v -p v -m ctrl");
   }
 }
 
@@ -117,25 +162,20 @@ const PASTE_SETTLE_LEGACY_MS: Record<string, number> = {
   linux: 300,
 };
 
-export async function pasteIntoFocusedApp(text: string): Promise<void> {
+export async function pasteIntoFocusedApp(
+  text: string,
+  beforePaste?: () => Promise<void> | void,
+): Promise<void> {
   log.debug(`text: ${JSON.stringify(text)}`);
   if (!text?.trim()) return;
 
   const prior = clipboard.readText();
   clipboard.writeText(text);
 
-  // Verify the clipboard write actually took effect before pasting.
-  // Electron's clipboard API is synchronous on the main thread, but a
-  // short spin-wait guards against external clipboard managers that may
-  // overwrite the value immediately after our write.
-  for (let i = 0; i < 5; i++) {
-    if (clipboard.readText() === text) break;
-    await new Promise((r) => setTimeout(r, 10));
-    clipboard.writeText(text);
-  }
-
   try {
-    let method: "native" | "legacy" = "legacy";
+    await beforePaste?.();
+
+    let method: PasteMethod = "legacy";
     switch (process.platform) {
       case "darwin":
         method = await pasteMac();
