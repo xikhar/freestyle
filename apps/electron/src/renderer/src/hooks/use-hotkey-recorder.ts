@@ -82,7 +82,7 @@ const CAPTURED_MODIFIER_KEYS: Record<string, string> = {
   RightSuper: "Super",
 };
 
-/** macOS: compound keys (Alt+Space) via DOM; Fn/right-mod via native IPC */
+/** Fallback capture inside Settings when native global recording is unavailable. */
 const USE_DOM_CAPTURE = true;
 
 const DOM_MODIFIER_KEYS = new Set([
@@ -323,6 +323,13 @@ export function useHotkeyRecorder(
     setInvalidReleaseNotice(false);
   }, [clearWarningTimer, showInvalidReleaseNotice]);
 
+  const hasDraftCombo = useCallback(() => {
+    return (
+      draftComboRef.current.key !== null ||
+      draftComboRef.current.modifiers.length > 0
+    );
+  }, []);
+
   // Global capture: native listener (all platforms) + DOM on macOS for Alt+Space etc.
   useEffect(() => {
     if (state !== "recording" || !window.api) return;
@@ -339,6 +346,7 @@ export function useHotkeyRecorder(
     });
 
     const removeReleased = window.api.onHotkeyRecordReleased(() => {
+      if (!hasDraftCombo()) return;
       completeRecording();
     });
 
@@ -356,7 +364,7 @@ export function useHotkeyRecorder(
       removeReleased();
       removeCancel();
     };
-  }, [state, completeRecording, updateDraftCombo]);
+  }, [state, completeRecording, hasDraftCombo, updateDraftCombo]);
 
   useEffect(() => {
     if (state !== "recording" || !USE_DOM_CAPTURE) return;
@@ -394,6 +402,7 @@ export function useHotkeyRecorder(
       e.stopPropagation();
 
       if (e.key === "Escape") return;
+      if (!hasDraftCombo()) return;
       completeRecording();
     };
 
@@ -403,7 +412,13 @@ export function useHotkeyRecorder(
       window.removeEventListener("keydown", handleKeyDown, true);
       window.removeEventListener("keyup", handleKeyUp, true);
     };
-  }, [state, cancelRecording, completeRecording, updateDraftCombo]);
+  }, [
+    state,
+    cancelRecording,
+    completeRecording,
+    hasDraftCombo,
+    updateDraftCombo,
+  ]);
 
   // Stop main process recording only if we started it (avoids re-registering hotkey on every settings navigation)
   useEffect(() => {
