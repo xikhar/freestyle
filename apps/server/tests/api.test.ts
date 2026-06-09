@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import app from "../src/index.js";
+import { getDb } from "../src/lib/db.js";
 
 // ---------------------------------------------------------------------------
 // Helper – shorthand for making requests against the Hono app
@@ -378,6 +379,11 @@ describe("API Keys", () => {
 // ---------------------------------------------------------------------------
 
 describe("History", () => {
+  beforeEach(() => {
+    const db = getDb();
+    db.exec("DELETE FROM transcription_history");
+  });
+
   it("GET /api/history returns empty list initially", async () => {
     const res = await req("/api/history");
     expect(res.status).toBe(200);
@@ -397,5 +403,117 @@ describe("History", () => {
   it("GET /api/history/:id returns 404 for missing entry", async () => {
     const res = await req("/api/history/9999");
     expect(res.status).toBe(404);
+  });
+
+  it("GET /api/history and /stats with date filters", async () => {
+    const db = getDb();
+
+    // Insert mock history records
+    const insertStmt = db.prepare(`
+      INSERT INTO transcription_history (
+        raw_text, cleaned_text, voice_provider, voice_model, llm_provider, llm_model, 
+        duration_ms, audio_duration_ms, input_tokens, output_tokens, cost_usd, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const now = new Date();
+
+    const formatDate = (d: Date, daysAgo = 0) => {
+      const target = new Date(d);
+      target.setUTCDate(target.getUTCDate() - daysAgo);
+      const year = target.getUTCFullYear();
+      const month = String(target.getUTCMonth() + 1).padStart(2, "0");
+      const day = String(target.getUTCDate()).padStart(2, "0");
+      return `${year}-${month}-${day} 12:00:00`;
+    };
+
+    const date10DaysAgo = formatDate(now, 10);
+    const date2DaysAgo = formatDate(now, 2);
+    const dateToday = formatDate(now, 0);
+
+    // Insert 10 days ago (cost 1.50)
+    insertStmt.run(
+      "Text 10 days ago",
+      "Clean 1",
+      "voice",
+      "model",
+      "llm",
+      "model",
+      1000,
+      1000,
+      10,
+      10,
+      1.5,
+      date10DaysAgo,
+    );
+    // Insert 2 days ago (cost 0.50)
+    insertStmt.run(
+      "Text 2 days ago",
+      "Clean 2",
+      "voice",
+      "model",
+      "llm",
+      "model",
+      1000,
+      1000,
+      10,
+      10,
+      0.5,
+      date2DaysAgo,
+    );
+    // Insert today (cost 2.00)
+    insertStmt.run(
+      "Text today",
+      "Clean 3",
+      "voice",
+      "model",
+      "llm",
+      "model",
+      1000,
+      1000,
+      10,
+      10,
+      2.0,
+      dateToday,
+    );
+
+    const todayStr = dateToday.split(" ")[0];
+    const start7DaysAgoStr = formatDate(now, 7).split(" ")[0];
+
+    // 1. Test unfiltered stats returns unfiltered_total_sessions = 3
+    const statsResAll = await req("/api/history/stats");
+    const statsAll = await statsResAll.json();
+    expect(statsAll.unfiltered_total_sessions).toBe(3);
+    expect(statsAll.total_sessions).toBe(3);
+    expect(statsAll.total_cost_usd).toBe(4.0);
+
+    // 2. Test GET /api/history filtering to past 7 days (weekly default)
+    const historyWeeklyRes = await req(
+      `/api/history?start_date=${start7DaysAgoStr}&end_date=${todayStr}`,
+    );
+    const historyWeekly = await historyWeeklyRes.json();
+    expect(historyWeekly.total).toBe(2);
+    expect(historyWeekly.items.map((i: any) => i.raw_text)).toContain(
+      "Text 2 days ago",
+    );
+    expect(historyWeekly.items.map((i: any) => i.raw_text)).toContain(
+      "Text today",
+    );
+
+    // 3. Test GET /api/history/stats filtering to past 7 days
+    const statsWeeklyRes = await req(
+      `/api/history/stats?start_date=${start7DaysAgoStr}&end_date=${todayStr}`,
+    );
+    const statsWeekly = await statsWeeklyRes.json();
+    expect(statsWeekly.unfiltered_total_sessions).toBe(3);
+    expect(statsWeekly.total_sessions).toBe(2);
+    expect(statsWeekly.total_cost_usd).toBe(2.5);
+
+    // 4. Test start_date validation fails (ignored if invalid format)
+    const statsInvalidRes = await req(
+      `/api/history/stats?start_date=invalid-date&end_date=${todayStr}`,
+    );
+    const statsInvalid = await statsInvalidRes.json();
+    expect(statsInvalid.total_sessions).toBe(3);
   });
 });
