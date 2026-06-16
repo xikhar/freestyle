@@ -1,4 +1,43 @@
 # Changelog
+## 0.2.0
+
+### New Features ✨
+
+- Volume pausing and/or ducking on recording by @MaxBtrn in [#226](https://github.com/freestyle-voice/freestyle/pull/226)
+
+### Bug Fixes 🐛
+
+#### Linux
+
+- Use persistent uinput helper for Wayland paste by @xikhar in [#268](https://github.com/freestyle-voice/freestyle/pull/268)
+- Show app icon in GNOME launcher and dock by @andrewjsalzer in [#246](https://github.com/freestyle-voice/freestyle/pull/246)
+
+#### Other
+
+- Move toLowerCase() outside loop in formats match endpoint by @kev0-4 in [#267](https://github.com/freestyle-voice/freestyle/pull/267)
+- Detect terminal focus for Linux paste on Wayland by @andrewjsalzer in [#218](https://github.com/freestyle-voice/freestyle/pull/218)
+
+### Internal Changes 🔧
+
+- Centralize settings key in a single file by @MaxBtrn in [#278](https://github.com/freestyle-voice/freestyle/pull/278)
+- Add vocabulary-bias unit tests and vocabulary API coverage by @anish808 in [#228](https://github.com/freestyle-voice/freestyle/pull/228)
+
+### Other
+
+- Fix onboarding flow and add the help page. by @matteo8p in [#286](https://github.com/freestyle-voice/freestyle/pull/286)
+- pnpm format by @matteo8p in [#285](https://github.com/freestyle-voice/freestyle/pull/285)
+- format' by @matteo8p in [fd977874](https://github.com/freestyle-voice/freestyle/commit/fd977874fa0490899b991e9a5c00872cdaa2d308)
+- Qwen Partial Streaming removal by @tigerisaac in [#260](https://github.com/freestyle-voice/freestyle/pull/260)
+- Fix pnpm format by @matteo8p in [#284](https://github.com/freestyle-voice/freestyle/pull/284)
+- Enhance: Added new languages for i18n localization by @srirae in [#244](https://github.com/freestyle-voice/freestyle/pull/244)
+- New buttons and formatting by @matteo8p in [#265](https://github.com/freestyle-voice/freestyle/pull/265)
+- Add Soniox realtime STT with upgraded LLM processing pipeline by @tigerisaac in [#240](https://github.com/freestyle-voice/freestyle/pull/240)
+- Fix toggle-mode hotkey spam pill UI bugs by @andrewjsalzer in [#248](https://github.com/freestyle-voice/freestyle/pull/248)
+- More robust language handling by @matteo8p in [#250](https://github.com/freestyle-voice/freestyle/pull/250)
+- Add SenseVoice Small as a Local MLX ASR model by @LauraGPT in [#236](https://github.com/freestyle-voice/freestyle/pull/236)
+- readme by @matteo8p in [#241](https://github.com/freestyle-voice/freestyle/pull/241)
+- content machine by @matteo8p in [c56396fb](https://github.com/freestyle-voice/freestyle/commit/c56396fbe719851e5c500228fdebe710ada64cb7)
+
 ## 0.1.8
 
 ### Bug Fixes 🐛
