@@ -77,6 +77,7 @@ import icon from "../../resources/icon.png?asset";
 import trayIconPath from "../../resources/tray/logoTemplate.png?asset";
 import { isActiveAudioPlaybackMode } from "../shared/audio-playback";
 import { getDefaultHotkey } from "../shared/hotkey-defaults";
+import { SETTINGS_KEYS } from "../shared/settings-keys";
 import { AudioPlaybackController } from "./audio-control/controller";
 import { HotkeyRecorder } from "./hotkey-recorder";
 import { normalizeAccelerator } from "./hotkey-utils";
@@ -1701,8 +1702,8 @@ function loadHotkeyFromDB(): string | undefined {
       const { DatabaseSync } = require("node:sqlite");
       const db = new DatabaseSync(dbPath);
       const row = db
-        .prepare("SELECT value FROM settings WHERE key = 'hotkey'")
-        .get() as { value: string } | undefined;
+        .prepare("SELECT value FROM settings WHERE key = ?")
+        .get(SETTINGS_KEYS.hotkey) as { value: string } | undefined;
       db.close();
       if (row?.value && isValidAccelerator(row.value)) {
         return row.value;
@@ -1721,8 +1722,8 @@ function loadHotkeyModeFromDB(): "hold" | "toggle" {
       const { DatabaseSync } = require("node:sqlite");
       const db = new DatabaseSync(dbPath);
       const row = db
-        .prepare("SELECT value FROM settings WHERE key = 'hotkey_mode'")
-        .get() as { value: string } | undefined;
+        .prepare("SELECT value FROM settings WHERE key = ?")
+        .get(SETTINGS_KEYS.hotkeyMode) as { value: string } | undefined;
       db.close();
       if (row?.value === "toggle") return "toggle";
     }
