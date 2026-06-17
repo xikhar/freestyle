@@ -30,6 +30,14 @@ const api = {
   showErrorDialog: (title: string, message: string): Promise<void> =>
     ipcRenderer.invoke("dialog:show-error", title, message),
   getServerPort: (): Promise<number> => ipcRenderer.invoke("server:port"),
+  // Server URL ("" = use the bundled local server)
+  getServerUrl: (): Promise<string> => ipcRenderer.invoke("server:url"),
+  setServerUrl: (url: string): Promise<string> =>
+    ipcRenderer.invoke("server:set-url", url),
+  // Optional bearer token for a configured server ("" = none)
+  getServerToken: (): Promise<string> => ipcRenderer.invoke("server:token"),
+  setServerToken: (token: string): Promise<string> =>
+    ipcRenderer.invoke("server:set-token", token),
   onHotkeyDown: (callback: () => void): (() => void) => {
     const handler = (): void => callback();
     ipcRenderer.on("hotkey:down", handler);

@@ -1,5 +1,12 @@
+import { serverUrlSchema } from "@freestyle/validations";
 import { KeyComboDisplay } from "@renderer/components/key-combo";
 import { LanguageSelector } from "@renderer/components/language-selector";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@renderer/components/ui/input-group";
 import { Select } from "@renderer/components/ui/select";
 import {
   comboDisplayKeys,
@@ -7,7 +14,13 @@ import {
   keyDisplayLabel,
   useHotkeyRecorder,
 } from "@renderer/hooks/use-hotkey-recorder";
-import { getClient } from "@renderer/lib/api";
+import {
+  checkServerAuth,
+  checkServerHealth,
+  getClient,
+  getLocalApiBase,
+  refreshApiBase,
+} from "@renderer/lib/api";
 import { LANGUAGES } from "@renderer/lib/languages";
 import { requestMicAccess, resolveMicStatus } from "@renderer/lib/permissions";
 import { cn } from "@renderer/lib/utils";
@@ -15,12 +28,16 @@ import {
   Check,
   Download,
   ExternalLink,
+  Eye,
+  EyeOff,
+  Key,
   Keyboard,
   Languages,
   Mic,
   Monitor,
   Moon,
   Pause,
+  Server,
   Sun,
   Trash2,
   Volume2,
@@ -89,6 +106,15 @@ export default function SettingsPage(): React.JSX.Element {
   const [autoUpdate, setAutoUpdate] = useState(true);
   const [launchAtStartup, setLaunchAtStartup] = useState(false);
   const [showOnLaunch, setShowOnLaunch] = useState(true);
+  const [serverUrlInput, setServerUrlInput] = useState("");
+  const [savedServerUrl, setSavedServerUrl] = useState("");
+  const [serverTokenInput, setServerTokenInput] = useState("");
+  const [savedServerToken, setSavedServerToken] = useState("");
+  const [showToken, setShowToken] = useState(false);
+  const [serverUrlError, setServerUrlError] = useState<string | null>(null);
+  const [serverTest, setServerTest] = useState<
+    "idle" | "testing" | "ok" | "unreachable" | "unauthorized"
+  >("idle");
 
   const microphoneOptions = useMemo(
     () => [
@@ -355,6 +381,22 @@ export default function SettingsPage(): React.JSX.Element {
       .then((v) => setShowOnLaunch(v))
       .catch(() => {});
 
+    // Server URL + token ("" = local server / no auth)
+    window.api
+      ?.getServerUrl()
+      .then((url) => {
+        setSavedServerUrl(url);
+        setServerUrlInput(url);
+      })
+      .catch(() => {});
+    window.api
+      ?.getServerToken()
+      .then((token) => {
+        setSavedServerToken(token);
+        setServerTokenInput(token);
+      })
+      .catch(() => {});
+
     // Auto-updater events
     const removeAvail = window.api?.onUpdateAvailable((info) => {
       setUpdateAvailable(info.version);
@@ -466,6 +508,62 @@ export default function SettingsPage(): React.JSX.Element {
   const handleShowOnLaunchToggle = useCallback((enabled: boolean) => {
     setShowOnLaunch(enabled);
     window.api?.setShowDashboardOnLaunch(enabled);
+  }, []);
+
+  const testServer = useCallback(async (rawUrl: string, token: string) => {
+    const parsed = serverUrlSchema.safeParse(rawUrl);
+    if (!parsed.success) {
+      setServerUrlError(parsed.error.issues[0].message);
+      setServerTest("idle");
+      return;
+    }
+    const base = parsed.data || getLocalApiBase();
+    setServerTest("testing");
+    if (!(await checkServerHealth(base, 5000))) {
+      setServerTest("unreachable");
+      return;
+    }
+    // Always probe an authenticated endpoint so we catch both a wrong token and
+    // a server that requires a token when none was entered.
+    if (!(await checkServerAuth(base, token.trim(), 5000))) {
+      setServerTest("unauthorized");
+      return;
+    }
+    setServerTest("ok");
+  }, []);
+
+  const handleSaveServer = useCallback(async () => {
+    const parsed = serverUrlSchema.safeParse(serverUrlInput);
+    if (!parsed.success) {
+      setServerUrlError(parsed.error.issues[0].message);
+      return;
+    }
+    setServerUrlError(null);
+    const savedUrl =
+      (await window.api?.setServerUrl(parsed.data)) ?? parsed.data;
+    const savedToken =
+      (await window.api?.setServerToken(serverTokenInput)) ??
+      serverTokenInput.trim();
+    setSavedServerUrl(savedUrl);
+    setServerUrlInput(savedUrl);
+    setSavedServerToken(savedToken);
+    setServerTokenInput(savedToken);
+    // Apply the new base/token to this window's client immediately. Switching
+    // the local server on/off still needs a restart (see the row description).
+    await refreshApiBase();
+    await testServer(savedUrl, savedToken);
+  }, [serverUrlInput, serverTokenInput, testServer]);
+
+  const handleResetServer = useCallback(async () => {
+    const savedUrl = (await window.api?.setServerUrl("")) ?? "";
+    const savedToken = (await window.api?.setServerToken("")) ?? "";
+    setSavedServerUrl(savedUrl);
+    setServerUrlInput(savedUrl);
+    setSavedServerToken(savedToken);
+    setServerTokenInput(savedToken);
+    setServerUrlError(null);
+    setServerTest("idle");
+    await refreshApiBase();
   }, []);
 
   const clearHistory = useCallback(async () => {
@@ -923,6 +1021,147 @@ export default function SettingsPage(): React.JSX.Element {
               <Trash2 className="h-3.5 w-3.5" />
               {t("settings.data.clearHistory")}
             </button>
+          </Row>
+        </Section>
+
+        <Section label="Server" tight>
+          <Row
+            label="Server URL"
+            desc="Leave empty to use the built-in local server. Point this at a self-hosted Freestyle server (e.g. http://your-vm:4649) to use that instead, with an access token if it requires one. Restart the app after changing this."
+            last
+          >
+            <div className="flex w-full max-w-md flex-col gap-2.5">
+              <div className="flex items-center gap-2">
+                <span
+                  className={cn(
+                    "mono inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-[3px] text-[9px] uppercase tracking-[0.14em]",
+                    savedServerUrl
+                      ? "bg-secondary text-secondary-foreground"
+                      : "bg-accent text-accent-foreground",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "h-1.5 w-1.5 rounded-full",
+                      savedServerUrl ? "bg-muted-foreground" : "bg-primary",
+                    )}
+                  />
+                  {savedServerUrl ? "Custom server" : "Local server"}
+                </span>
+                {savedServerUrl && (
+                  <span className="text-muted-foreground min-w-0 truncate text-xs">
+                    {savedServerUrl}
+                  </span>
+                )}
+              </div>
+              <InputGroup>
+                <InputGroupInput
+                  id="settings-server-url"
+                  type="text"
+                  value={serverUrlInput}
+                  aria-invalid={!!serverUrlError}
+                  onChange={(e) => {
+                    setServerUrlInput(e.target.value);
+                    setServerTest("idle");
+                    setServerUrlError(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSaveServer();
+                  }}
+                  placeholder="http://127.0.0.1:4649 (local)"
+                />
+                <InputGroupAddon>
+                  <Server />
+                </InputGroupAddon>
+              </InputGroup>
+              <InputGroup
+                className={cn(!serverUrlInput.trim() && "opacity-55")}
+              >
+                <InputGroupInput
+                  id="settings-server-token"
+                  type={showToken ? "text" : "password"}
+                  value={serverTokenInput}
+                  onChange={(e) => {
+                    setServerTokenInput(e.target.value);
+                    setServerTest("idle");
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSaveServer();
+                  }}
+                  placeholder="Access token (optional)"
+                />
+                <InputGroupAddon>
+                  <Key />
+                </InputGroupAddon>
+                {serverTokenInput && (
+                  <InputGroupAddon align="inline-end">
+                    <InputGroupButton
+                      size="icon-xs"
+                      aria-label={showToken ? "Hide token" : "Show token"}
+                      onClick={() => setShowToken((v) => !v)}
+                    >
+                      {showToken ? <EyeOff /> : <Eye />}
+                    </InputGroupButton>
+                  </InputGroupAddon>
+                )}
+              </InputGroup>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleSaveServer}
+                  disabled={
+                    serverUrlInput.trim() === savedServerUrl.trim() &&
+                    serverTokenInput.trim() === savedServerToken.trim()
+                  }
+                  className="bg-foreground text-background hover:bg-foreground/90 inline-flex shrink-0 items-center rounded-md px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50"
+                >
+                  {t("common.save")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => testServer(serverUrlInput, serverTokenInput)}
+                  disabled={serverTest === "testing"}
+                  className="border-border hover:bg-secondary inline-flex shrink-0 items-center rounded-md border px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50"
+                >
+                  Test connection
+                </button>
+                {(savedServerUrl ||
+                  savedServerToken ||
+                  serverUrlInput.trim() ||
+                  serverTokenInput.trim()) && (
+                  <button
+                    type="button"
+                    onClick={handleResetServer}
+                    className="text-muted-foreground hover:text-foreground inline-flex shrink-0 items-center rounded-md px-2 py-1.5 text-xs font-medium transition-colors"
+                  >
+                    Reset to local
+                  </button>
+                )}
+                {serverTest === "testing" && (
+                  <span className="text-muted-foreground text-xs">
+                    Testing…
+                  </span>
+                )}
+                {serverTest === "ok" && (
+                  <span className="text-primary inline-flex items-center gap-1 text-xs">
+                    <Check className="h-3.5 w-3.5" /> Connected
+                  </span>
+                )}
+                {serverTest === "unreachable" && (
+                  <span className="text-destructive text-xs">Unreachable</span>
+                )}
+                {serverTest === "unauthorized" && (
+                  <span className="text-destructive text-xs">
+                    Token rejected
+                  </span>
+                )}
+              </div>
+              {serverUrlError && (
+                <span className="text-destructive text-xs">
+                  {serverUrlError}
+                </span>
+              )}
+            </div>
           </Row>
         </Section>
       </div>
