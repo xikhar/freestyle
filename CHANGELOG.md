@@ -1,4 +1,25 @@
 # Changelog
+## 0.2.1
+
+### New Features ✨
+
+- Configurable post-processing intensity (Low/Medium/High/Custom) by @MathurAditya724 in [#301](https://github.com/freestyle-voice/freestyle/pull/301)
+- Run the server standalone (Docker) and connect the app to it by @MathurAditya724 in [#297](https://github.com/freestyle-voice/freestyle/pull/297)
+
+### Bug Fixes 🐛
+
+- Minor changes in server routes by @MathurAditya724 in [2ef92aa2](https://github.com/freestyle-voice/freestyle/commit/2ef92aa281f225882b566b07327b458072a9cf94)
+
+### Internal Changes 🔧
+
+- (ui) Unify on shadcn components by @MathurAditya724 in [#298](https://github.com/freestyle-voice/freestyle/pull/298)
+
+### Other
+
+- Clearer Settings page by @tigerisaac in [#288](https://github.com/freestyle-voice/freestyle/pull/288)
+- Fix Linux whisper-server AVX-512 crash by @andrewjsalzer in [#296](https://github.com/freestyle-voice/freestyle/pull/296)
+- Add Groq Whisper Large v3 to the voice model catalog. by @tigerisaac in [#299](https://github.com/freestyle-voice/freestyle/pull/299)
+
 ## 0.2.0
 
 ### New Features ✨
