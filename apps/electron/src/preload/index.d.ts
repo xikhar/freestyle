@@ -23,10 +23,12 @@ declare global {
       showErrorDialog: (title: string, message: string) => Promise<void>;
       getServerPort: () => Promise<number>;
       openLogsFolder: () => Promise<boolean>;
+      openExternal: (url: string) => Promise<boolean>;
       getServerUrl: () => Promise<string>;
       setServerUrl: (url: string) => Promise<string>;
       getServerToken: () => Promise<string>;
       setServerToken: (token: string) => Promise<string>;
+      cloudPromptSignIn: () => Promise<boolean>;
       onHotkeyDown: (callback: () => void) => () => void;
       onHotkeyUp: (callback: () => void) => () => void;
       onPillCancel: (callback: () => void) => () => void;

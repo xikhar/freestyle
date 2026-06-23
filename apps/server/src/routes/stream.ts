@@ -2,6 +2,7 @@ import { createAppLogger } from "@freestyle/utils";
 import { upgradeWebSocket } from "@hono/node-server";
 import { Hono } from "hono";
 import { sanitizeTranscriptText } from "../lib/editor/model-hints.js";
+import { FreestyleCloudAuthError } from "../lib/freestyle-cloud.js";
 import { saveProcessedHistory, saveRawHistory } from "../lib/history-store.js";
 import { getLanguageSetting } from "../lib/language.js";
 import {
@@ -12,6 +13,7 @@ import {
 import { postProcess, prewarmPostProcess } from "../lib/post-process.js";
 import { capture, captureException } from "../lib/posthog.js";
 import { getDefaultModels } from "../lib/providers.js";
+import { invalidateSession } from "../lib/sessions.js";
 import { shouldKeepStreamingUpstreamAlive } from "../lib/streaming/session-policy.js";
 import { stripProviderPrefix } from "../lib/streaming/types.js";
 import {
@@ -20,6 +22,7 @@ import {
   type StreamSession,
   supportsSessionTransport,
   supportsStreaming,
+  voiceProviderCategory,
 } from "../lib/streaming-stt.js";
 import { resolveAsrVocabularyBias } from "../lib/vocabulary-bias.js";
 
@@ -181,6 +184,7 @@ const stream = new Hono().get(
           model: modelShort,
           streaming: canStream,
           sessionTransport: canUseSessionTransport,
+          providerCategory: voiceProviderCategory(voice.provider),
         }),
       );
 
@@ -313,6 +317,9 @@ const stream = new Hono().get(
                 }
                 capture("streaming transcription completed", {
                   provider: voiceDefaults!.provider,
+                  provider_category: voiceProviderCategory(
+                    voiceDefaults!.provider,
+                  ),
                   model: voiceDefaults!.model_id,
                   duration_ms: durationMs,
                   audio_duration_ms: audioDurationMs,
@@ -344,6 +351,19 @@ const stream = new Hono().get(
                 }
               })
               .catch((err) => {
+                if (err instanceof FreestyleCloudAuthError) {
+                  invalidateSession();
+                  if (!closed) {
+                    ws.send(
+                      JSON.stringify({
+                        type: "error",
+                        code: "cloud_auth_required",
+                        message: "Sign in to Freestyle Cloud",
+                      }),
+                    );
+                  }
+                  return;
+                }
                 captureException(err);
                 if (!closed) {
                   ws.send(JSON.stringify({ type: "final", text: rawText }));

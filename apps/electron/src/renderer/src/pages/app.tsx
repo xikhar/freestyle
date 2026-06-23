@@ -101,6 +101,8 @@ interface TranscribeResult {
   raw: string;
   cleaned: string;
   error?: string;
+  cloudAuthRequired?: boolean;
+  providerCategory?: string;
 }
 
 /**
@@ -130,6 +132,7 @@ export default function AppPage(): React.JSX.Element {
   const [pillSide, setPillSide] = useState<"center" | "right">("center");
   const supportsSessionTransportRef = useRef(false);
   const recordingSessionUsesTransportRef = useRef(false);
+  const providerCategoryRef = useRef<string | null>(null);
 
   const [pendingCount, setPendingCount] = useState(0);
 
@@ -215,6 +218,11 @@ export default function AppPage(): React.JSX.Element {
 
       const nonEmpty = results.filter((r) => r.raw.trim());
       if (nonEmpty.length === 0) {
+        if (results.some((r) => r.cloudAuthRequired)) {
+          hidePill();
+          void window.api.cloudPromptSignIn();
+          return;
+        }
         const errMsg = results.find((r) => r.error)?.error;
         if (errMsg) {
           hidePill();
@@ -248,6 +256,16 @@ export default function AppPage(): React.JSX.Element {
           if (res.ok) {
             const data = await res.json();
             finalText = data.cleaned || combined;
+          } else if (res.status === 401) {
+            const body = (await res.json().catch(() => null)) as {
+              error?: string;
+            } | null;
+            if (body?.error === "cloud_auth_required") {
+              hidePill();
+              void window.api.cloudPromptSignIn();
+              return;
+            }
+            finalText = combined;
           } else {
             finalText = combined;
           }
@@ -282,11 +300,16 @@ export default function AppPage(): React.JSX.Element {
       // North-star usage metric: fires exactly once per completed dictation,
       // at the single point where single-chunk, multi-chunk, and
       // session-transport paths converge and text is delivered to the user.
+      const providerCategory =
+        nonEmpty.find((r) => r.providerCategory)?.providerCategory ??
+        providerCategoryRef.current ??
+        undefined;
       capture("dictation completed", {
         segments: nonEmpty.length,
         multi_segment: nonEmpty.length > 1,
         output_mode: _outputMode,
         char_count: finalText.length,
+        provider_category: providerCategory,
       });
 
       if (
@@ -333,11 +356,29 @@ export default function AppPage(): React.JSX.Element {
         headers,
       })
         .then(async (res) => {
-          if (!res.ok) return { raw: "", cleaned: "", error: errorMsg };
-          const data = (await res.json()) as { raw?: string; cleaned?: string };
+          if (!res.ok) {
+            const body = (await res.json().catch(() => null)) as {
+              error?: string;
+            } | null;
+            if (res.status === 401 && body?.error === "cloud_auth_required") {
+              return {
+                raw: "",
+                cleaned: "",
+                error: "Sign in to Freestyle Cloud",
+                cloudAuthRequired: true,
+              };
+            }
+            return { raw: "", cleaned: "", error: errorMsg };
+          }
+          const data = (await res.json()) as {
+            raw?: string;
+            cleaned?: string;
+            provider_category?: string;
+          };
           return {
             raw: (data.raw || "").trim(),
             cleaned: (data.cleaned || data.raw || "").trim(),
+            providerCategory: data.provider_category,
           };
         })
         .catch(() => ({ raw: "", cleaned: "", error: errorMsg }));
@@ -354,6 +395,9 @@ export default function AppPage(): React.JSX.Element {
         {
           onConfig: (config) => {
             supportsSessionTransportRef.current = config.sessionTransport;
+            if (config.providerCategory) {
+              providerCategoryRef.current = config.providerCategory;
+            }
             if (wantsMicRef.current) {
               recordingSessionUsesTransportRef.current =
                 config.sessionTransport;
@@ -799,6 +843,14 @@ export default function AppPage(): React.JSX.Element {
             error?: string;
             detail?: string;
           } | null;
+          if (res.status === 401 && body?.error === "cloud_auth_required") {
+            return {
+              raw: "",
+              cleaned: "",
+              error: "Sign in to Freestyle Cloud",
+              cloudAuthRequired: true,
+            };
+          }
           const msg =
             body?.detail ||
             body?.error ||
@@ -808,10 +860,12 @@ export default function AppPage(): React.JSX.Element {
         const data = (await res.json()) as {
           raw?: string;
           cleaned?: string;
+          provider_category?: string;
         };
         return {
           raw: (data.raw || "").trim(),
           cleaned: (data.cleaned || data.raw || "").trim(),
+          providerCategory: data.provider_category,
         };
       })
       .catch((err) => {

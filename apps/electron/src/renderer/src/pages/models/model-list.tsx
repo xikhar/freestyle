@@ -12,6 +12,7 @@ import {
 } from "@renderer/components/ui/input-group";
 import { Progress } from "@renderer/components/ui/progress";
 import { RevealToggle } from "@renderer/components/ui/reveal-toggle";
+import { useCloudAuth } from "@renderer/lib/auth-context";
 import type {
   AvailableModel,
   VoiceItem,
@@ -26,6 +27,7 @@ import {
   Key,
   Laptop,
   Loader2,
+  LogIn,
   Mic,
   RefreshCw,
   Search,
@@ -158,7 +160,9 @@ function buildLlmRows(
         selected:
           m.defaultLlm?.model_id === model.model_id &&
           m.defaultLlm?.provider === model.provider_id,
-        hasKey: m.keyProviders.has(providerId),
+        hasKey:
+          providerId === FREESTYLE_CLOUD_TIER.provider_id ||
+          m.keyProviders.has(providerId),
         onSelect: () => h.onPickCloud(model),
       });
     }
@@ -243,8 +247,7 @@ export function ModelList({
   const q = search.toLowerCase();
   // Curated-only for LLM until expanded; searching always searches everything.
   const curatedOnly = type === "llm" && !showAllLlm && !q;
-  const visible = rows.filter((r) => {
-    if (curatedOnly && !r.curated) return false;
+  const filteredRows = rows.filter((r) => {
     if (filter === "cloud" && r.source !== "cloud") return false;
     if (filter === "local" && r.source !== "local") return false;
     if (
@@ -257,8 +260,12 @@ export function ModelList({
     if (q && !`${r.name} ${r.meta}`.toLowerCase().includes(q)) return false;
     return true;
   });
+  const visible = filteredRows.filter((r) => {
+    if (curatedOnly && !r.curated) return false;
+    return true;
+  });
   const hiddenCount = curatedOnly
-    ? rows.length - rows.filter((r) => r.curated).length
+    ? filteredRows.length - filteredRows.filter((r) => r.curated).length
     : 0;
 
   const showLocalLlmForm =
@@ -347,22 +354,14 @@ export function ModelList({
 }
 
 // ---------------------------------------------------------------------------
-// VoiceTiers — the simple picker: three meaningful choices, no model IDs.
+// VoiceTiers — the simple picker: two meaningful choices, no model IDs.
 // ---------------------------------------------------------------------------
 
-const ACCURATE_TIER: AvailableModel = {
-  provider_id: "openai",
-  provider_name: "OpenAI",
-  model_id: "openai/gpt-4o-transcribe",
-  model_name: "OpenAI Transcribe",
-  type: "voice",
-};
-
-const FASTEST_TIER: AvailableModel = {
-  provider_id: "groq",
-  provider_name: "Groq",
-  model_id: "groq/whisper-large-v3-turbo",
-  model_name: "Groq Whisper Turbo",
+const FREESTYLE_CLOUD_TIER: AvailableModel = {
+  provider_id: "freestyle-cloud",
+  provider_name: "Freestyle Cloud",
+  model_id: "freestyle-cloud/stt",
+  model_name: "Freestyle Cloud (Managed)",
   type: "voice",
 };
 
@@ -383,6 +382,7 @@ function VoiceTiers({
   ) => void;
   onShowAll: () => void;
 }): React.JSX.Element {
+  const cloud = useCloudAuth();
   const privateItem = m.voiceItems.find(
     (it) => it.key === recommendedVoiceKey(m.voiceItems),
   );
@@ -443,10 +443,22 @@ function VoiceTiers({
         </Button>
       </header>
 
-      <div className="grid grid-cols-1 gap-3 p-5 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 p-5 sm:grid-cols-2">
+        <TierCard
+          title="Freestyle Cloud"
+          badge="Recommended"
+          description="Managed by Freestyle. Fast and accurate, no API key — just sign in."
+          detail={
+            cloud.user ? `Signed in as ${cloud.user.email}` : "Sign-in required"
+          }
+          selected={isSelected(
+            FREESTYLE_CLOUD_TIER.model_id,
+            FREESTYLE_CLOUD_TIER.provider_id,
+          )}
+          onClick={() => onPickCloud(FREESTYLE_CLOUD_TIER)}
+        />
         <TierCard
           title="Private"
-          badge="Recommended"
           description="Runs on your device. Nothing leaves it. Free."
           detail={
             downloading
@@ -470,24 +482,6 @@ function VoiceTiers({
             </p>
           )}
         </TierCard>
-        <TierCard
-          title="Most accurate"
-          description="OpenAI cloud — needs an API key (~$0.18/hr)."
-          detail={
-            m.keyProviders.has("openai") ? "Key added" : "We'll ask for a key"
-          }
-          selected={isSelected(ACCURATE_TIER.model_id, "openai")}
-          onClick={() => onPickCloud(ACCURATE_TIER)}
-        />
-        <TierCard
-          title="Fastest"
-          description="Groq cloud — needs an API key (~$0.04/hr)."
-          detail={
-            m.keyProviders.has("groq") ? "Key added" : "We'll ask for a key"
-          }
-          selected={isSelected(FASTEST_TIER.model_id, "groq")}
-          onClick={() => onPickCloud(FASTEST_TIER)}
-        />
       </div>
 
       <footer className="border-border flex items-center justify-between border-t px-5 py-3">
@@ -669,7 +663,9 @@ function ModelRow({
   row: Row;
   first: boolean;
 }): React.JSX.Element {
+  const cloud = useCloudAuth();
   const local = row.source === "local";
+  const isFreestyleCloud = row.provider === FREESTYLE_CLOUD_TIER.provider_id;
   const status = row.status ?? "not_downloaded";
   const downloading =
     local && (status === "downloading" || status === "verifying");
@@ -759,6 +755,17 @@ function ModelRow({
               </Button>
             )}
           </>
+        ) : isFreestyleCloud ? (
+          cloud.user ? (
+            <Button variant="ink" size="sm" onClick={row.onSelect}>
+              Use
+            </Button>
+          ) : (
+            <Button variant="outline" size="sm" onClick={row.onSelect}>
+              <LogIn data-icon="inline-start" />
+              Sign in to use
+            </Button>
+          )
         ) : row.hasKey ? (
           <Button variant="ink" size="sm" onClick={row.onSelect}>
             Use

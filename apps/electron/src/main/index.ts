@@ -1362,6 +1362,20 @@ app.whenReady().then(async () => {
     }
   });
 
+  ipcMain.handle("open:external", async (_event, url: unknown) => {
+    if (typeof url !== "string") return false;
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+        return false;
+      }
+      await shell.openExternal(parsed.toString());
+      return true;
+    } catch {
+      return false;
+    }
+  });
+
   // IPC: read the configured server URL ("" = use the local server)
   ipcMain.handle("server:url", () => getServerUrl());
 
@@ -1381,6 +1395,21 @@ app.whenReady().then(async () => {
       serverToken: typeof token === "string" ? token.trim() : "",
     });
     return getServerToken();
+  });
+
+  ipcMain.handle("cloud:prompt-sign-in", async () => {
+    const { response } = await dialog.showMessageBox({
+      type: "info",
+      message: "Sign in to Freestyle Cloud",
+      detail:
+        "Freestyle Cloud needs you to sign in before it can transcribe or clean up text. Open Models settings to sign in or switch providers.",
+      buttons: ["Open Models", "Not Now"],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response !== 0) return false;
+    showSettingsWindow("/settings/models");
+    return true;
   });
 
   ipcMain.handle(

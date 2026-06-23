@@ -33,6 +33,8 @@ const api = {
   // Reveal the diagnostic logs folder (freestyle.log) in the OS file manager.
   openLogsFolder: (): Promise<boolean> =>
     ipcRenderer.invoke("logs:open-folder"),
+  openExternal: (url: string): Promise<boolean> =>
+    ipcRenderer.invoke("open:external", url),
   // Server URL ("" = use the bundled local server)
   getServerUrl: (): Promise<string> => ipcRenderer.invoke("server:url"),
   setServerUrl: (url: string): Promise<string> =>
@@ -41,6 +43,8 @@ const api = {
   getServerToken: (): Promise<string> => ipcRenderer.invoke("server:token"),
   setServerToken: (token: string): Promise<string> =>
     ipcRenderer.invoke("server:set-token", token),
+  cloudPromptSignIn: (): Promise<boolean> =>
+    ipcRenderer.invoke("cloud:prompt-sign-in"),
   onHotkeyDown: (callback: () => void): (() => void) => {
     const handler = (): void => callback();
     ipcRenderer.on("hotkey:down", handler);

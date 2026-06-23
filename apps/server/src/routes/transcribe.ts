@@ -1,6 +1,13 @@
 import { createAppLogger } from "@freestyle/utils";
 import { Hono } from "hono";
+import { getDb, readSetting } from "../lib/db.js";
+import { applyDictionaryReplacements } from "../lib/dictionary-replacements.js";
 import { sanitizeTranscriptText } from "../lib/editor/model-hints.js";
+import {
+  FREESTYLE_CLOUD_PROVIDER_ID,
+  FreestyleCloudAuthError,
+  transcribeWithFreestyleCloud,
+} from "../lib/freestyle-cloud.js";
 import { saveProcessedHistory, saveRawHistory } from "../lib/history-store.js";
 import { getLanguageSetting } from "../lib/language.js";
 import {
@@ -12,11 +19,22 @@ import {
 import { postProcess } from "../lib/post-process.js";
 import { capture, captureException } from "../lib/posthog.js";
 import { getDefaultModels } from "../lib/providers.js";
+import { invalidateSession } from "../lib/sessions.js";
+import { CloudAuthError } from "../lib/streaming/providers/freestyle-cloud.js";
 import { getProvider } from "../lib/streaming/registry.js";
 import { getApiKeyForProvider } from "../lib/streaming-stt.js";
 import { resolveAsrVocabularyBias } from "../lib/vocabulary-bias.js";
 
 const log = createAppLogger("transcribe");
+
+function routeVoiceProviderCategory(
+  providerId: string,
+): "local" | "byok" | "freestyle_cloud" {
+  if (providerId === "local-whisper" || providerId === "local-mlx")
+    return "local";
+  if (providerId === FREESTYLE_CLOUD_PROVIDER_ID) return "freestyle_cloud";
+  return "byok";
+}
 
 /**
  * The client percent-encodes the x-app-context header so non-Latin1
@@ -74,6 +92,7 @@ const transcribeRoute = new Hono().post("/", async (c) => {
     );
   }
 
+  const db = getDb();
   let rawText: string;
   let transcribeDurationInSeconds: number | undefined;
   const language = getLanguageSetting();
@@ -90,12 +109,97 @@ const transcribeRoute = new Hono().post("/", async (c) => {
 
   const apiKey = getApiKeyForProvider(defaults.voice.provider);
   if (!apiKey) {
+    // Freestyle Cloud has no stored key — a null token means "signed out".
+    if (defaults.voice.provider === FREESTYLE_CLOUD_PROVIDER_ID) {
+      return c.json({ error: "cloud_auth_required" }, 401);
+    }
     return c.json(
       {
         error: `No API key configured for provider: ${defaults.voice.provider}`,
       },
       400,
     );
+  }
+
+  const voiceProvider = defaults.voice.provider;
+  const voiceModel = defaults.voice.model_id;
+  const skipPostProcess = c.req.header("x-skip-post-process") === "true";
+  const freestyleCleanupActive =
+    !skipPostProcess &&
+    defaults.llm?.provider === FREESTYLE_CLOUD_PROVIDER_ID &&
+    readSetting("llm_cleanup") === "true";
+
+  if (voiceProvider === FREESTYLE_CLOUD_PROVIDER_ID && freestyleCleanupActive) {
+    try {
+      const result = await transcribeWithFreestyleCloud({
+        token: apiKey,
+        audio: audioData,
+        language,
+        appContext,
+        mode: "combined",
+      });
+      rawText = sanitizeTranscriptText(result.raw ?? "");
+      const cleaned = applyDictionaryReplacements(
+        sanitizeTranscriptText(result.cleaned ?? rawText),
+        db,
+      );
+      const durationMs = Date.now() - start;
+      const inputTokens = result.usage?.inputTokens ?? 0;
+      const outputTokens = result.usage?.outputTokens ?? 0;
+
+      try {
+        saveProcessedHistory({
+          rawText,
+          cleanedText: cleaned !== rawText ? cleaned : null,
+          voiceProvider,
+          voiceModel,
+          llmProvider: FREESTYLE_CLOUD_PROVIDER_ID,
+          llmModel: defaults.llm?.model_id ?? "freestyle-cloud/post-process",
+          durationMs,
+          audioDurationMs,
+          inputTokens,
+          outputTokens,
+          costUsd: 0,
+        });
+      } catch (err) {
+        log.error(`Failed to save history: ${err}`);
+      }
+
+      capture("transcription completed", {
+        provider: voiceProvider,
+        provider_category: routeVoiceProviderCategory(voiceProvider),
+        model: voiceModel,
+        duration_ms: durationMs,
+        audio_duration_ms: audioDurationMs,
+        post_processed: true,
+        llm_provider: FREESTYLE_CLOUD_PROVIDER_ID,
+        llm_model: defaults.llm?.model_id,
+        input_tokens: inputTokens,
+        output_tokens: outputTokens,
+        cost_usd: 0,
+      });
+
+      return c.json({
+        raw: rawText,
+        cleaned,
+        model: voiceModel,
+        provider_category: routeVoiceProviderCategory(voiceProvider),
+        durationMs,
+      });
+    } catch (err) {
+      if (err instanceof FreestyleCloudAuthError) {
+        invalidateSession();
+        return c.json({ error: "cloud_auth_required" }, 401);
+      }
+      captureException(err, { provider: voiceProvider, model: voiceModel });
+      return c.json(
+        {
+          error: "Transcription failed",
+          detail: err instanceof Error ? err.message : String(err),
+        },
+        500,
+      );
+    }
   }
 
   try {
@@ -132,6 +236,11 @@ const transcribeRoute = new Hono().post("/", async (c) => {
       `STT took ${Date.now() - t0}ms | rawText=${JSON.stringify(rawText).slice(0, 120)}`,
     );
   } catch (err) {
+    // Expired/invalid cloud session — ask the desktop app to re-authenticate.
+    if (err instanceof CloudAuthError) {
+      invalidateSession();
+      return c.json({ error: "cloud_auth_required" }, 401);
+    }
     captureException(err, {
       provider: defaults.voice.provider,
       model: defaults.voice.model_id,
@@ -143,6 +252,7 @@ const transcribeRoute = new Hono().post("/", async (c) => {
     });
     capture("transcription failed", {
       provider: defaults.voice.provider,
+      provider_category: routeVoiceProviderCategory(defaults.voice.provider),
       model: defaults.voice.model_id,
       error: err instanceof Error ? err.message : String(err),
     });
@@ -174,10 +284,6 @@ const transcribeRoute = new Hono().post("/", async (c) => {
       : {}),
   });
 
-  const voiceProvider = defaults.voice.provider;
-  const voiceModel = defaults.voice.model_id;
-  const skipPostProcess = c.req.header("x-skip-post-process") === "true";
-
   if (skipPostProcess) {
     try {
       saveRawHistory({
@@ -193,6 +299,7 @@ const transcribeRoute = new Hono().post("/", async (c) => {
 
     capture("transcription completed", {
       provider: voiceProvider,
+      provider_category: routeVoiceProviderCategory(voiceProvider),
       model: voiceModel,
       duration_ms: durationMs,
       audio_duration_ms: audioDurationMs,
@@ -203,15 +310,25 @@ const transcribeRoute = new Hono().post("/", async (c) => {
       raw: rawText,
       cleaned: rawText,
       model: voiceModel,
+      provider_category: routeVoiceProviderCategory(voiceProvider),
       durationMs,
     });
   }
 
   const ppStart = Date.now();
-  const pp = await postProcess(rawText, appContext, {
-    language,
-    source: "batch",
-  });
+  let pp: Awaited<ReturnType<typeof postProcess>>;
+  try {
+    pp = await postProcess(rawText, appContext, {
+      language,
+      source: "batch",
+    });
+  } catch (err) {
+    if (err instanceof FreestyleCloudAuthError) {
+      invalidateSession();
+      return c.json({ error: "cloud_auth_required" }, 401);
+    }
+    throw err;
+  }
   log.debug(
     `post-process took ${Date.now() - ppStart}ms | cleaned=${JSON.stringify(pp.cleaned).slice(0, 120)}`,
   );
@@ -238,6 +355,7 @@ const transcribeRoute = new Hono().post("/", async (c) => {
 
   capture("transcription completed", {
     provider: voiceProvider,
+    provider_category: routeVoiceProviderCategory(voiceProvider),
     model: voiceModel,
     duration_ms: durationMs,
     audio_duration_ms: audioDurationMs,
@@ -253,6 +371,7 @@ const transcribeRoute = new Hono().post("/", async (c) => {
     raw: rawText,
     cleaned: pp.cleaned,
     model: voiceModel,
+    provider_category: routeVoiceProviderCategory(voiceProvider),
     durationMs,
   });
 });

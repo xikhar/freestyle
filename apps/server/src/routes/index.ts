@@ -2,6 +2,7 @@ import { createAppLogger } from "@freestyle/utils";
 import { Hono } from "hono";
 import { capture, captureException, getDeviceId } from "../lib/posthog.js";
 import apiKeys from "./api-keys.js";
+import auth from "./auth.js";
 import dictionary from "./dictionary.js";
 import formats from "./formats.js";
 import history from "./history.js";
@@ -71,6 +72,7 @@ const apiRouter = new Hono()
   })
   .route("/settings", settings)
   .route("/keys", apiKeys)
+  .route("/auth", auth)
   .route("/models", models)
   .route("/transcribe", transcribe)
   .route("/history", history)
