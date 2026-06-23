@@ -3,6 +3,12 @@ import { Hono } from "hono";
 import { getDb } from "../lib/db.js";
 import { sanitizeTranscriptText } from "../lib/editor/model-hints.js";
 import { getLanguageSetting } from "../lib/language.js";
+import {
+  FreestyleEventType,
+  PipelineStage,
+  parseAppContext,
+  plugins,
+} from "../lib/plugins/index.js";
 import { postProcess } from "../lib/post-process.js";
 import { capture, captureException } from "../lib/posthog.js";
 import { getDefaultModels } from "../lib/providers.js";
@@ -70,6 +76,7 @@ const transcribeRoute = new Hono().post("/", async (c) => {
 
   const db = getDb();
   let rawText: string;
+  let transcribeDurationInSeconds: number | undefined;
   const language = getLanguageSetting();
 
   const provider = getProvider(defaults.voice.provider);
@@ -107,6 +114,21 @@ const transcribeRoute = new Hono().post("/", async (c) => {
       bias,
     });
     rawText = sanitizeTranscriptText(result.text);
+
+    // Plugin hook: rewrite the raw transcript before cleanup.
+    rawText = (
+      await plugins().run(
+        "afterTranscribe",
+        {
+          providerId: defaults.voice.provider,
+          modelId: defaults.voice.model_id,
+          appContext: parseAppContext(appContext),
+        },
+        { text: rawText },
+      )
+    ).text;
+    transcribeDurationInSeconds = result.durationInSeconds;
+
     log.debug(
       `STT took ${Date.now() - t0}ms | rawText=${JSON.stringify(rawText).slice(0, 120)}`,
     );
@@ -114,6 +136,11 @@ const transcribeRoute = new Hono().post("/", async (c) => {
     captureException(err, {
       provider: defaults.voice.provider,
       model: defaults.voice.model_id,
+    });
+    void plugins().emit({
+      type: FreestyleEventType.PipelineError,
+      stage: PipelineStage.Transcribe,
+      message: err instanceof Error ? err.message : String(err),
     });
     capture("transcription failed", {
       provider: defaults.voice.provider,
@@ -139,6 +166,14 @@ const transcribeRoute = new Hono().post("/", async (c) => {
       durationMs,
     });
   }
+
+  void plugins().emit({
+    type: FreestyleEventType.Transcribed,
+    text: rawText,
+    ...(transcribeDurationInSeconds !== undefined
+      ? { durationInSeconds: transcribeDurationInSeconds }
+      : {}),
+  });
 
   const voiceProvider = defaults.voice.provider;
   const voiceModel = defaults.voice.model_id;

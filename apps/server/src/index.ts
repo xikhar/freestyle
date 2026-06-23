@@ -9,13 +9,22 @@ import {
   activateManagedMlxRuntimeForAppVersion,
   prefetchManagedMlxRuntimeForAppRelease,
 } from "./lib/mlx-asr/runtime.js";
+import {
+  disposeServerPlugins,
+  initServerPlugins,
+} from "./lib/plugins/index.js";
 import { captureException, shutdownPosthog } from "./lib/posthog.js";
 import routes from "./routes";
 import { autoStartMlxAsrServer } from "./routes/mlx-asr.js";
 import { autoStartWhisperServer } from "./routes/whisper.js";
 
-process.on("SIGINT", () => shutdownPosthog().finally(() => process.exit(0)));
-process.on("SIGTERM", () => shutdownPosthog().finally(() => process.exit(0)));
+async function shutdownServer(): Promise<void> {
+  await disposeServerPlugins().catch(() => {});
+  await shutdownPosthog();
+}
+
+process.on("SIGINT", () => shutdownServer().finally(() => process.exit(0)));
+process.on("SIGTERM", () => shutdownServer().finally(() => process.exit(0)));
 
 const app = new Hono()
   // CORS for renderer requests (skip WebSocket upgrades)
@@ -87,7 +96,8 @@ export function startServer(
         hostname: host,
         websocket: { server: wss },
       },
-      (info) => {
+      async (info) => {
+        await initServerPlugins();
         resolve({ server, port: info.port });
       },
     );
@@ -98,6 +108,7 @@ export function startServer(
 
 export { closeDb } from "./lib/db.js";
 export { stopMlxServer } from "./lib/mlx-asr/server.js";
+export { disposeServerPlugins } from "./lib/plugins/index.js";
 export { captureException, shutdownPosthog } from "./lib/posthog.js";
 export { stopServer as stopWhisperServer } from "./lib/whisper/server.js";
 export {

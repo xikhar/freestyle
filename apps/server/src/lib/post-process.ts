@@ -4,7 +4,7 @@ import type { CleanupIntensity } from "@freestyle/validations";
 import { parseCleanupIntensity } from "@freestyle/validations";
 import { generateText } from "ai";
 import { getModelCost, isCleanupModelSupported } from "../routes/models.js";
-import { getDb } from "./db.js";
+import { getDb, readSetting } from "./db.js";
 import { applyDictionaryReplacements } from "./dictionary-replacements.js";
 import { maxOutputTokensForCleanup } from "./editor/max-output-tokens.js";
 import { sanitizeTranscriptText } from "./editor/model-hints.js";
@@ -15,6 +15,12 @@ import {
   normalizeGroqModelId,
   prewarmGroqConnection,
 } from "./groq-http.js";
+import {
+  FreestyleEventType,
+  PipelineStage,
+  parseAppContext,
+  plugins,
+} from "./plugins/index.js";
 import { capture, captureException } from "./posthog.js";
 import { createChatModel, getDefaultModels } from "./providers.js";
 
@@ -48,28 +54,16 @@ export interface PostProcessOptions {
   includeTimings?: boolean;
 }
 
-function readSetting(
-  db: ReturnType<typeof getDb>,
-  key: string,
-): string | undefined {
-  const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as
-    | { value: string }
-    | undefined;
-  return row?.value;
+function isLlmCleanupEnabled(): boolean {
+  return readSetting("llm_cleanup") === "true";
 }
 
-function isLlmCleanupEnabled(db: ReturnType<typeof getDb>): boolean {
-  return readSetting(db, "llm_cleanup") === "true";
+function getCleanupIntensity(): CleanupIntensity {
+  return parseCleanupIntensity(readSetting("cleanup_intensity"));
 }
 
-function getCleanupIntensity(db: ReturnType<typeof getDb>): CleanupIntensity {
-  return parseCleanupIntensity(readSetting(db, "cleanup_intensity"));
-}
-
-function getCleanupCustomPrompt(
-  db: ReturnType<typeof getDb>,
-): string | undefined {
-  return readSetting(db, "cleanup_custom_prompt");
+function getCleanupCustomPrompt(): string | undefined {
+  return readSetting("cleanup_custom_prompt");
 }
 
 function resolveChatModel(provider: string, modelId: string) {
@@ -109,7 +103,7 @@ export function groqCleanupProviderOptions(
 export function prewarmPostProcess(): void {
   const defaults = getDefaultModels();
   const llm = defaults.llm;
-  if (!llm || !isLlmCleanupEnabled(getDb())) return;
+  if (!llm || !isLlmCleanupEnabled()) return;
 
   if (llm.provider === "groq") {
     void prewarmGroqConnection(normalizeGroqModelId(llm.model_id));
@@ -129,6 +123,7 @@ export async function postProcess(
   const source = options.source ?? "batch";
   const ppStart = Date.now();
   const db = getDb();
+  const parsedContext = parseAppContext(appContext);
   const defaults = getDefaultModels();
   let inputTokens = 0;
   let outputTokens = 0;
@@ -156,20 +151,38 @@ export async function postProcess(
   const llmStart = Date.now();
   let handoffMs = 0;
 
-  if (llm && isLlmCleanupEnabled(db)) {
+  if (llm && isLlmCleanupEnabled()) {
     if (!(await isCleanupModelSupported(llm.provider, llm.model_id))) {
       log.warn(
         `Skipping LLM cleanup: unsupported cleanup model ${llm.provider}/${llm.model_id}`,
       );
     } else {
       const rewriteContext = getRewritePromptContext(appContext, db);
+
+      // Plugin hook: let plugins override the inferred writing register and
+      // append extra system-prompt fragments. Runs before prompt assembly so a
+      // register override actually feeds into buildRewritePrompt.
+      const promptHook = await plugins().run(
+        "beforeCleanup",
+        {
+          text: normalizedRawText,
+          appContext: parsedContext,
+          inferredRegister: rewriteContext.registerMode,
+        },
+        { system: [] as string[], register: rewriteContext.registerMode },
+      );
+
       const { system, prompt } = buildRewritePrompt(normalizedRawText, {
         contextHint: rewriteContext.contextHint || undefined,
         language: options.language,
-        registerMode: rewriteContext.registerMode,
-        intensity: getCleanupIntensity(db),
-        customPrompt: getCleanupCustomPrompt(db),
+        registerMode: promptHook.register ?? rewriteContext.registerMode,
+        intensity: getCleanupIntensity(),
+        customPrompt: getCleanupCustomPrompt(),
       });
+      const pluginSystem =
+        promptHook.system.length > 0
+          ? system + promptHook.system.map((s) => `\n\n${s}`).join("")
+          : system;
 
       handoffMs = Date.now() - handoffStart;
 
@@ -177,7 +190,7 @@ export async function postProcess(
         const chatModel = resolveChatModel(llm.provider, llm.model_id);
         const result = await generateText({
           model: chatModel,
-          system,
+          system: pluginSystem,
           prompt,
           temperature: 0,
           maxOutputTokens: maxOutputTokensForCleanup(normalizedRawText),
@@ -194,6 +207,11 @@ export async function postProcess(
         cleanedText = sanitizeTranscriptText(result.text);
       } catch (err) {
         captureException(err);
+        void plugins().emit({
+          type: FreestyleEventType.PipelineError,
+          stage: PipelineStage.Cleanup,
+          message: err instanceof Error ? err.message : String(err),
+        });
         capture("post process failed", {
           provider: llm.provider,
           model: llm.model_id,
@@ -207,6 +225,26 @@ export async function postProcess(
 
   const llmMs = Date.now() - llmStart;
   cleanedText = applyDictionaryReplacements(cleanedText, db);
+
+  // Plugin hook: final text-rewrite chain, in the same stage as dictionary
+  // replacement. Each plugin sees the previous plugin's output.
+  cleanedText = (
+    await plugins().run(
+      "afterCleanup",
+      { appContext: parsedContext },
+      { text: cleanedText },
+    )
+  ).text;
+
+  // Emit once per dictation whenever any stage (LLM cleanup, dictionary, or a
+  // plugin) changed the text, reporting the full raw -> final transformation.
+  if (cleanedText !== normalizedRawText) {
+    void plugins().emit({
+      type: FreestyleEventType.Cleaned,
+      before: normalizedRawText,
+      after: cleanedText,
+    });
+  }
 
   if (inputTokens > 0 || outputTokens > 0) {
     try {
