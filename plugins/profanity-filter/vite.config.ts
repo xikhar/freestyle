@@ -1,13 +1,11 @@
 import { resolve } from "node:path";
+import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
-// Builds the plugin's UI page (ui/index.html) into dist/ui, alongside the
-// pkgroll-built hooks at dist/index.js. The page is served by the host over the
-// freestyle-plugin:// protocol, so it must use relative asset paths
-// (base: "./").
 export default defineConfig({
   root: resolve(__dirname, "ui"),
   base: "./",
+  plugins: [react()],
   build: {
     outDir: resolve(__dirname, "dist/ui"),
     emptyOutDir: true,
