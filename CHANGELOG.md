@@ -1,4 +1,22 @@
 # Changelog
+## 0.3.2
+
+### Bug Fixes 🐛
+
+- (ui) Use popper positioning for select dropdowns by @MathurAditya724 in [#343](https://github.com/freestyle-voice/freestyle/pull/343)
+- Show voice pill on the monitor under the cursor by @MathurAditya724 in [#349](https://github.com/freestyle-voice/freestyle/pull/349)
+- Collapse spurious line breaks from local ASR transcripts by @MathurAditya724 in [#348](https://github.com/freestyle-voice/freestyle/pull/348)
+- Make plugin protocol/IPC registration and DB init idempotent by @MathurAditya724 in [#347](https://github.com/freestyle-voice/freestyle/pull/347)
+- Correct macos hotkey suppression matching by @tigerisaac in [#346](https://github.com/freestyle-voice/freestyle/pull/346)
+- Keep source language during cleanup in auto-detect mode by @MathurAditya724 in [#345](https://github.com/freestyle-voice/freestyle/pull/345)
+- Stop whisper server before deleting model file by @MathurAditya724 in [#344](https://github.com/freestyle-voice/freestyle/pull/344)
+
+### Other
+
+- [Clean up] Remove custom server URLs from settings by @matteo8p in [#342](https://github.com/freestyle-voice/freestyle/pull/342)
+- package back to 0.0.0 by @matteo8p in [#339](https://github.com/freestyle-voice/freestyle/pull/339)
+- [Plugin] Profanity filter plugin by @matteo8p in [#338](https://github.com/freestyle-voice/freestyle/pull/338)
+
 ## 0.3.1
 
 ### New Features ✨
